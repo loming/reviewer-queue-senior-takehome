@@ -556,7 +556,8 @@ onUnmounted(() => {
         </div>
         <h2 class="modal-title">{{ MODAL_CONFIG[modal.action].title }}</h2>
         <p class="modal-body">{{ MODAL_CONFIG[modal.action].body }}</p>
-        <div class="modal-ref">{{ modal.id }} &middot; {{ items.find(i => i.id === modal!.id)?.title }}</div>
+        <div class="modal-ref"><span class="modal-ref-id">{{ modal.id }}</span></div>
+        <div class="modal-item-title">{{ items.find(i => i.id === modal!.id)?.title }}</div>
         <div v-if="modal.action === 'reject'" style="margin-bottom:18px;">
           <label class="modal-reason-label">Reason <span class="modal-reason-optional">(optional)</span></label>
           <textarea v-model="modalReason" class="modal-textarea" placeholder="Add a note for the record&hellip;"></textarea>
