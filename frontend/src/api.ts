@@ -44,7 +44,8 @@ export async function applyReviewAction(
   });
 
   if (!response.ok) {
-    throw new Error("Action failed");
+    const errorPayload = await response.json().catch(() => null);
+    throw new Error(errorPayload?.detail ?? "Action failed");
   }
 
   const payload = await response.json();

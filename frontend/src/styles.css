@@ -139,6 +139,30 @@ h2 {
   margin-bottom: 22px;
 }
 
+.risk-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.risk-high {
+  background: #ffe0e0;
+  color: #9b1c1c;
+}
+
+.risk-medium {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.risk-low {
+  background: #d4edda;
+  color: #155724;
+}
+
 .status-pill {
   border-radius: 999px;
   background: #e8eef7;
@@ -146,6 +170,37 @@ h2 {
   color: #28364a;
   font-size: 13px;
   font-weight: 700;
+}
+
+.status-pill.status-unassigned {
+  background: #e8eef7;
+  color: #28364a;
+}
+
+.status-pill.status-in_review {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.status-pill.status-approved {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-pill.status-rejected {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-pill.status-escalated {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.terminal-notice {
+  color: #66758a;
+  font-style: italic;
+  margin-top: 28px;
 }
 
 .facts {

@@ -18,6 +18,16 @@ const selectedItem = computed(() =>
   items.value.find((item) => item.id === selectedId.value) ?? items.value[0] ?? null
 );
 
+const TERMINAL_STATUSES = new Set(["approved", "rejected", "escalated"]);
+
+const allowedActions = computed<ReviewAction[]>(() => {
+  if (!selectedItem.value) return [];
+  const status = selectedItem.value.status;
+  if (status === "unassigned") return ["claim"];
+  if (status === "in_review") return ["approve", "reject", "escalate"];
+  return [];
+});
+
 async function loadItems() {
   isLoading.value = true;
   errorMessage.value = null;
@@ -40,9 +50,14 @@ async function performAction(action: ReviewAction) {
 
   try {
     const updated = await applyReviewAction(selectedItem.value.id, action, currentReviewer);
-    items.value = items.value.map((item) => (item.id === updated.id ? updated : item));
+    if (TERMINAL_STATUSES.has(updated.status)) {
+      items.value = items.value.filter((item) => item.id !== updated.id);
+      selectedId.value = items.value[0]?.id ?? null;
+    } else {
+      items.value = items.value.map((item) => (item.id === updated.id ? updated : item));
+    }
   } catch (error) {
-    errorMessage.value = "That action could not be completed.";
+    errorMessage.value = error instanceof Error ? error.message : "That action could not be completed.";
   } finally {
     pendingAction.value = null;
   }
@@ -82,7 +97,10 @@ onMounted(loadItems);
           @click="selectedId = item.id"
         >
           <span class="queue-title">{{ item.title }}</span>
-          <span class="queue-meta">{{ item.risk_level }} risk · {{ item.customer_tier }}</span>
+          <span class="queue-meta">
+            <span :class="['risk-badge', `risk-${item.risk_level}`]">{{ item.risk_level }}</span>
+            risk · {{ item.customer_tier }}
+          </span>
           <span class="queue-meta">{{ item.status }} · {{ item.assigned_reviewer ?? "unassigned" }}</span>
         </button>
       </aside>
@@ -93,7 +111,7 @@ onMounted(loadItems);
             <p class="eyebrow">{{ selectedItem.id }}</p>
             <h2>{{ selectedItem.title }}</h2>
           </div>
-          <span class="status-pill">{{ selectedItem.status }}</span>
+          <span :class="['status-pill', `status-${selectedItem.status}`]">{{ selectedItem.status }}</span>
         </div>
 
         <dl class="facts">
@@ -118,20 +136,18 @@ onMounted(loadItems);
         <p class="summary">{{ selectedItem.summary }}</p>
         <p class="notes">{{ selectedItem.notes_count }} notes on this item</p>
 
-        <div class="actions" aria-label="Workflow actions">
-          <button type="button" :disabled="Boolean(pendingAction)" @click="performAction('claim')">
-            Claim
-          </button>
-          <button type="button" :disabled="Boolean(pendingAction)" @click="performAction('approve')">
-            Approve
-          </button>
-          <button type="button" :disabled="Boolean(pendingAction)" @click="performAction('reject')">
-            Reject
-          </button>
-          <button type="button" :disabled="Boolean(pendingAction)" @click="performAction('escalate')">
-            Escalate
+        <div v-if="allowedActions.length > 0" class="actions" aria-label="Workflow actions">
+          <button
+            v-for="action in allowedActions"
+            :key="action"
+            type="button"
+            :disabled="Boolean(pendingAction)"
+            @click="performAction(action)"
+          >
+            {{ action.charAt(0).toUpperCase() + action.slice(1) }}
           </button>
         </div>
+        <p v-else class="terminal-notice">No actions available — this item is {{ selectedItem.status }}.</p>
       </section>
     </section>
   </main>
