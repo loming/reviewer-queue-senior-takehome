@@ -13,8 +13,12 @@ const selectedId = ref<string | null>(null);
 const isLoading = ref(false);
 const errorMessage = ref<string | null>(null);
 const pendingAction = ref<{ action: ReviewAction; id: string } | null>(null);
-const filter = ref<"all" | "mine">("all");
+const filter = ref<"active" | "processed" | "mine">("active");
+const searchQuery = ref("");
+const riskFilter = ref<"all" | "high" | "medium" | "low">("all");
+const tierFilter = ref<"all" | "priority" | "standard">("all");
 const showHelp = ref(false);
+const searchInput = ref<HTMLInputElement | null>(null);
 
 // Modal state
 const modal = ref<{ action: ReviewAction; id: string } | null>(null);
@@ -32,9 +36,12 @@ const RISK_META: Record<string, { bg: string; text: string; accent: string; labe
   low:    { bg: "#D1FAE5", text: "#065F46", accent: "#059669", label: "Low",    order: 2, group: "Low risk" },
 };
 
-const STATUS_META: Record<string, { bg: string; text: string; label: string }> = {
+const STATUS_META: Record<string, { bg: string; text: string; label: string; accent?: string }> = {
   unassigned: { bg: "#E5E7EB", text: "#374151", label: "Unassigned" },
   in_review:  { bg: "#DBEAFE", text: "#1E40AF", label: "In review" },
+  approved:   { bg: "#D1FAE5", text: "#065F46", label: "Approved", accent: "#059669" },
+  rejected:   { bg: "#FEE2E2", text: "#991B1B", label: "Rejected", accent: "#DC2626" },
+  escalated:  { bg: "#FEF3C7", text: "#92400E", label: "Escalated", accent: "#D97706" },
 };
 
 const SHORTCUTS = [
@@ -44,6 +51,7 @@ const SHORTCUTS = [
   { label: "Reject", key: "R" },
   { label: "Escalate", key: "E" },
   { label: "Dismiss", key: "Esc" },
+  { label: "Search", key: "/" },
 ];
 
 const MODAL_CONFIG: Record<string, { eyebrow: string; accent: string; title: string; body: string; confirm: string }> = {
@@ -52,12 +60,27 @@ const MODAL_CONFIG: Record<string, { eyebrow: string; accent: string; title: str
   escalate: { eyebrow: "Escalate", accent: "#D97706", title: "Escalate to senior review?",   body: "This sends the item to the senior review queue and removes it from yours.",                             confirm: "Escalate" },
 };
 
-// Computed: visible items based on filter
+// Computed: visible items based on all filters
 const visibleItems = computed(() => {
-  if (filter.value === "mine") {
-    return items.value.filter(i => i.assigned_reviewer === currentReviewer);
+  let result = items.value;
+  if (filter.value === "active") {
+    result = result.filter(i => !TERMINAL_STATUSES.has(i.status));
+  } else if (filter.value === "processed") {
+    result = result.filter(i => TERMINAL_STATUSES.has(i.status));
+  } else if (filter.value === "mine") {
+    result = result.filter(i => i.assigned_reviewer === currentReviewer);
   }
-  return items.value;
+  if (riskFilter.value !== "all") {
+    result = result.filter(i => i.risk_level === riskFilter.value);
+  }
+  if (tierFilter.value !== "all") {
+    result = result.filter(i => i.customer_tier === tierFilter.value);
+  }
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase();
+    result = result.filter(i => i.id.toLowerCase().includes(q) || i.title.toLowerCase().includes(q));
+  }
+  return result;
 });
 
 // Computed: effective selected id
@@ -71,33 +94,47 @@ const selectedItem = computed(() =>
   items.value.find(i => i.id === effectiveId.value) ?? null
 );
 
-// Computed: groups for queue
+// Computed: groups for queue (by risk for active, by status for processed)
 const groups = computed(() => {
   const result: { label: string; dot: string; count: string; items: ReviewItem[] }[] = [];
-  for (const key of ["high", "medium", "low"] as const) {
-    const list = visibleItems.value.filter(i => i.risk_level === key);
-    if (!list.length) continue;
-    const r = RISK_META[key];
-    result.push({
-      label: r.group,
-      dot: r.accent,
-      count: list.length + (list.length === 1 ? " item" : " items"),
-      items: list,
-    });
+  if (filter.value === "processed") {
+    for (const status of ["approved", "rejected", "escalated"] as const) {
+      const list = visibleItems.value.filter(i => i.status === status);
+      if (!list.length) continue;
+      const m = STATUS_META[status];
+      result.push({ label: m.label, dot: m.accent ?? m.text, count: list.length + (list.length === 1 ? " item" : " items"), items: list });
+    }
+  } else {
+    for (const key of ["high", "medium", "low"] as const) {
+      const list = visibleItems.value.filter(i => i.risk_level === key);
+      if (!list.length) continue;
+      const r = RISK_META[key];
+      result.push({ label: r.group, dot: r.accent, count: list.length + (list.length === 1 ? " item" : " items"), items: list });
+    }
   }
   return result;
 });
 
-// Computed: counts
+// Computed: summary counts (always reflects active queue health)
 const counts = computed(() => {
-  const v = visibleItems.value;
-  const unc = v.filter(i => i.status === "unassigned").length;
-  const inr = v.length - unc;
+  const active = items.value.filter(i => !TERMINAL_STATUSES.has(i.status));
+  const now = Date.now();
   return {
-    total: v.length + (v.length === 1 ? " item" : " items"),
-    breakdown: unc + " unassigned · " + inr + " in review",
+    highRisk: active.filter(i => i.risk_level === "high").length,
+    unassigned: active.filter(i => i.status === "unassigned").length,
+    over24h: active.filter(i => (now - new Date(i.submitted_at).getTime()) > 24 * 3600000).length,
   };
 });
+
+const tabCounts = computed(() => ({
+  active: items.value.filter(i => !TERMINAL_STATUSES.has(i.status)).length,
+  processed: items.value.filter(i => TERMINAL_STATUSES.has(i.status)).length,
+  mine: items.value.filter(i => i.assigned_reviewer === currentReviewer).length,
+}));
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim() !== "" || riskFilter.value !== "all" || tierFilter.value !== "all"
+);
 
 // Computed: allowed actions for selected item
 const allowedActions = computed<ReviewAction[]>(() => {
@@ -136,7 +173,7 @@ async function loadItems() {
   isLoading.value = true;
   errorMessage.value = null;
   try {
-    items.value = await fetchReviewItems();
+    items.value = await fetchReviewItems(false);
     selectedId.value = effectiveId.value;
   } catch {
     errorMessage.value = "Something went wrong loading the queue.";
@@ -176,12 +213,9 @@ async function startAction(action: ReviewAction, id: string) {
     const updated = await applyReviewAction(id, action, currentReviewer);
     if (TERMINAL_STATUSES.has(updated.status)) {
       const idx = visibleItems.value.findIndex(i => i.id === id);
-      items.value = items.value.filter(i => i.id !== updated.id);
-      const newVisible = filter.value === "mine"
-        ? items.value.filter(i => i.assigned_reviewer === currentReviewer)
-        : items.value;
-      const next = newVisible[Math.min(idx, newVisible.length - 1)];
-      selectedId.value = next?.id ?? null;
+      items.value = items.value.map(i => i.id === updated.id ? updated : i);
+      const v = visibleItems.value;
+      selectedId.value = v.length ? v[Math.min(Math.max(0, idx), v.length - 1)].id : null;
       const past: Record<string, string> = { approve: "approved", reject: "rejected", escalate: "escalated" };
       showToast(id + " " + past[action], action === "approve" ? "#059669" : action === "reject" ? "#DC2626" : "#D97706");
     } else {
@@ -211,7 +245,11 @@ function onKeyDown(e: KeyboardEvent) {
     return;
   }
   const t = e.target as HTMLElement;
-  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) {
+    if (e.key === "Escape") (t as HTMLElement).blur();
+    return;
+  }
+  if (e.key === "/" && !modal.value) { e.preventDefault(); searchInput.value?.focus(); return; }
 
   const v = visibleItems.value;
   if (!v.length) return;
@@ -278,18 +316,49 @@ onUnmounted(() => {
       <!-- Queue panel -->
       <section class="queue-panel" aria-label="Review queue">
         <div class="queue-header">
-          <div class="queue-counts">
-            <span class="queue-total">{{ counts.total }}</span>
-            <span class="queue-breakdown">{{ counts.breakdown }}</span>
+          <div class="summary-bar">
+            <span class="summary-stat"><span class="summary-dot high"></span>{{ counts.highRisk }} high-risk</span>
+            <span class="summary-sep">&middot;</span>
+            <span class="summary-stat">{{ counts.unassigned }} unassigned</span>
+            <span class="summary-sep">&middot;</span>
+            <span class="summary-stat" :class="{ warn: counts.over24h > 0 }">{{ counts.over24h }} waiting &gt;24h</span>
           </div>
           <div class="filter-tabs">
-            <button class="filter-tab" :class="{ active: filter === 'all' }" @click="filter = 'all'">All active</button>
-            <button class="filter-tab" :class="{ active: filter === 'mine' }" @click="filter = 'mine'">My items</button>
+            <button class="filter-tab" :class="{ active: filter === 'active' }" @click="filter = 'active'">Active <span class="tab-count">{{ tabCounts.active }}</span></button>
+            <button class="filter-tab" :class="{ active: filter === 'processed' }" @click="filter = 'processed'">Processed <span class="tab-count">{{ tabCounts.processed }}</span></button>
+            <button class="filter-tab" :class="{ active: filter === 'mine' }" @click="filter = 'mine'">Mine <span class="tab-count">{{ tabCounts.mine }}</span></button>
+          </div>
+          <div class="search-row">
+            <svg class="search-icon" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/><line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <input ref="searchInput" v-model="searchQuery" type="text" class="search-input" placeholder="Search by title or ID..." />
+            <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">&times;</button>
+          </div>
+          <div class="filter-row">
+            <select v-model="riskFilter" class="filter-select">
+              <option value="all">All risk levels</option>
+              <option value="high">High risk</option>
+              <option value="medium">Medium risk</option>
+              <option value="low">Low risk</option>
+            </select>
+            <select v-model="tierFilter" class="filter-select">
+              <option value="all">All tiers</option>
+              <option value="priority">Priority</option>
+              <option value="standard">Standard</option>
+            </select>
           </div>
         </div>
 
         <div class="queue-scroll" role="listbox" aria-label="Queue items">
-          <div v-for="group in groups" :key="group.label">
+          <div v-if="visibleItems.length === 0" class="queue-empty">
+            <template v-if="hasActiveFilters">
+              No items match your filters.
+              <button class="clear-filters-btn" @click="searchQuery = ''; riskFilter = 'all'; tierFilter = 'all'">Clear filters</button>
+            </template>
+            <template v-else-if="filter === 'processed'">No processed items yet.</template>
+            <template v-else-if="filter === 'mine'">No items assigned to you.</template>
+            <template v-else>Queue is empty.</template>
+          </div>
+          <div v-for="group in groups" :key="group.label" v-else>
             <div class="queue-group-header">
               <span class="queue-group-dot" :style="{ background: group.dot }"></span>
               <span class="queue-group-label">{{ group.label }}</span>
@@ -454,13 +523,25 @@ onUnmounted(() => {
           <div class="empty-icon">
             <div class="empty-check"></div>
           </div>
-          <template v-if="items.length === 0">
+          <template v-if="filter === 'active' && tabCounts.active === 0">
             <div class="empty-title">All caught up</div>
             <div class="empty-sub">No items need review right now. Nice work.</div>
           </template>
-          <template v-else>
+          <template v-else-if="filter === 'processed' && tabCounts.processed === 0">
+            <div class="empty-title">No processed items</div>
+            <div class="empty-sub">Items appear here after being approved, rejected, or escalated.</div>
+          </template>
+          <template v-else-if="filter === 'mine' && tabCounts.mine === 0">
             <div class="empty-title">Nothing assigned to you</div>
-            <div class="empty-sub">Switch to "All active" to see the full queue.</div>
+            <div class="empty-sub">Switch to "Active" to see the full queue.</div>
+          </template>
+          <template v-else-if="hasActiveFilters">
+            <div class="empty-title">No matching items</div>
+            <div class="empty-sub">Try adjusting your search or filters.</div>
+          </template>
+          <template v-else>
+            <div class="empty-title">Select an item</div>
+            <div class="empty-sub">Choose an item from the queue to view details.</div>
           </template>
         </div>
       </section>

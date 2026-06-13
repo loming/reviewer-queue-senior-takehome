@@ -21,8 +21,8 @@ export interface ReviewItem {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-export async function fetchReviewItems(): Promise<ReviewItem[]> {
-  const response = await fetch(`${API_BASE_URL}/review-items`);
+export async function fetchReviewItems(activeOnly = true): Promise<ReviewItem[]> {
+  const response = await fetch(`${API_BASE_URL}/review-items?active_only=${activeOnly}`);
   if (!response.ok) {
     throw new Error("Could not load review items");
   }
